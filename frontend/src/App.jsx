@@ -1,10 +1,14 @@
 import { useState, useRef } from 'react'
-import { Upload, Music, Activity, BarChart3, Download, Play, Pause, Volume2 } from 'lucide-react'
+import { Upload, Music, Activity, BarChart3, Download, Play, Pause, Volume2, Eye, Waves } from 'lucide-react'
 import { Button } from '@/components/ui/button.jsx'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card.jsx'
 import { Progress } from '@/components/ui/progress.jsx'
 import { Badge } from '@/components/ui/badge.jsx'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs.jsx'
+import { Switch } from '@/components/ui/switch.jsx'
+import { Label } from '@/components/ui/label.jsx'
+import MusicVisualizer from '@/components/MusicVisualizer.jsx'
+import BeatsList from '@/components/BeatsList.jsx'
 import './App.css'
 
 const API_BASE_URL = 'http://localhost:5001/api/music'
@@ -20,6 +24,7 @@ function App() {
   const [isPlaying, setIsPlaying] = useState(false)
   const [currentTime, setCurrentTime] = useState(0)
   const [duration, setDuration] = useState(0)
+  const [visualizationMode, setVisualizationMode] = useState('beats') // 'beats' or 'melody'
   
   const fileInputRef = useRef(null)
   const audioRef = useRef(null)
@@ -61,6 +66,8 @@ function App() {
     setFile(selectedFile)
     setError(null)
     setAnalysisResults(null)
+    setCurrentTime(0)
+    setDuration(0)
     
     // Create audio URL for playback
     const url = URL.createObjectURL(selectedFile)
@@ -75,7 +82,16 @@ function App() {
     setUploadProgress(0)
     
     try {
+      // Test backend connection first
+      console.log('Testing backend connection...')
+      const healthResponse = await fetch(`${API_BASE_URL}/health`)
+      if (!healthResponse.ok) {
+        throw new Error(`Backend not responding. Status: ${healthResponse.status}`)
+      }
+      console.log('Backend connection successful')
+      
       // Upload file
+      console.log('Uploading file...')
       const formData = new FormData()
       formData.append('file', file)
       
@@ -85,26 +101,32 @@ function App() {
       })
       
       if (!uploadResponse.ok) {
-        throw new Error('Upload failed')
+        const errorText = await uploadResponse.text()
+        throw new Error(`Upload failed: ${uploadResponse.status} - ${errorText}`)
       }
       
       const uploadResult = await uploadResponse.json()
+      console.log('Upload successful:', uploadResult)
       setUploadProgress(50)
       
       // Analyze file
+      console.log('Starting analysis...')
       const analyzeResponse = await fetch(`${API_BASE_URL}/analyze/${uploadResult.upload_id}`, {
         method: 'POST',
       })
       
       if (!analyzeResponse.ok) {
-        throw new Error('Analysis failed')
+        const errorText = await analyzeResponse.text()
+        throw new Error(`Analysis failed: ${analyzeResponse.status} - ${errorText}`)
       }
       
       const analysisResult = await analyzeResponse.json()
+      console.log('Analysis successful:', analysisResult)
       setAnalysisResults(analysisResult)
       setUploadProgress(100)
       
     } catch (err) {
+      console.error('Error:', err)
       setError(err.message || 'An error occurred during analysis')
     } finally {
       setIsAnalyzing(false)
@@ -132,6 +154,17 @@ function App() {
     if (audioRef.current) {
       setDuration(audioRef.current.duration)
     }
+  }
+
+  const handleSeek = (time) => {
+    if (audioRef.current) {
+      audioRef.current.currentTime = time
+      setCurrentTime(time)
+    }
+  }
+
+  const handleBeatClick = (time) => {
+    handleSeek(time)
   }
 
   const formatTime = (seconds) => {
@@ -177,7 +210,7 @@ function App() {
             Argentine Tango Music Analyzer
           </h1>
           <p className="text-lg text-slate-600 dark:text-slate-400">
-            Advanced beat detection and melody analysis for tango dancers
+            Advanced beat detection and melody analysis with real-time visualization
           </p>
         </div>
 
@@ -213,41 +246,6 @@ function App() {
                       {(file.size / (1024 * 1024)).toFixed(2)} MB
                     </p>
                   </div>
-                  
-                  {audioUrl && (
-                    <div className="space-y-2">
-                      <audio
-                        ref={audioRef}
-                        src={audioUrl}
-                        onTimeUpdate={handleTimeUpdate}
-                        onLoadedMetadata={handleLoadedMetadata}
-                        onEnded={() => setIsPlaying(false)}
-                      />
-                      
-                      <div className="flex items-center justify-center gap-4">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={togglePlayback}
-                          className="flex items-center gap-2"
-                        >
-                          {isPlaying ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
-                          {isPlaying ? 'Pause' : 'Play'}
-                        </Button>
-                        <Volume2 className="h-4 w-4 text-slate-500" />
-                      </div>
-                      
-                      {duration > 0 && (
-                        <div className="space-y-1">
-                          <Progress value={(currentTime / duration) * 100} className="w-full" />
-                          <div className="flex justify-between text-xs text-slate-500">
-                            <span>{formatTime(currentTime)}</span>
-                            <span>{formatTime(duration)}</span>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  )}
                   
                   <div className="flex gap-2 justify-center">
                     <Button onClick={uploadAndAnalyze} disabled={isAnalyzing}>
@@ -299,6 +297,72 @@ function App() {
             )}
           </CardContent>
         </Card>
+
+        {/* Music Player and Visualization */}
+        {audioUrl && (
+          <Card className="mb-8">
+            <CardHeader>
+              <div className="flex justify-between items-center">
+                <CardTitle className="flex items-center gap-2">
+                  <Volume2 className="h-5 w-5" />
+                  Music Player & Visualization
+                </CardTitle>
+                
+                {analysisResults && (
+                  <div className="flex items-center space-x-4">
+                    <div className="flex items-center space-x-2">
+                      <Eye className="h-4 w-4" />
+                      <Label htmlFor="viz-mode" className="text-sm">Beats</Label>
+                      <Switch
+                        id="viz-mode"
+                        checked={visualizationMode === 'melody'}
+                        onCheckedChange={(checked) => setVisualizationMode(checked ? 'melody' : 'beats')}
+                      />
+                      <Label htmlFor="viz-mode" className="text-sm">Melody</Label>
+                      <Waves className="h-4 w-4" />
+                    </div>
+                  </div>
+                )}
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <audio
+                ref={audioRef}
+                src={audioUrl}
+                onTimeUpdate={handleTimeUpdate}
+                onLoadedMetadata={handleLoadedMetadata}
+                onEnded={() => setIsPlaying(false)}
+              />
+              
+              {/* Player Controls */}
+              <div className="flex items-center justify-center gap-4">
+                <Button
+                  variant="outline"
+                  size="lg"
+                  onClick={togglePlayback}
+                  className="flex items-center gap-2"
+                >
+                  {isPlaying ? <Pause className="h-5 w-5" /> : <Play className="h-5 w-5" />}
+                  {isPlaying ? 'Pause' : 'Play'}
+                </Button>
+              </div>
+
+              {/* Music Visualization */}
+              {duration > 0 && (
+                <MusicVisualizer
+                  audioRef={audioRef}
+                  duration={duration}
+                  currentTime={currentTime}
+                  beats={analysisResults?.beat_analysis?.beats || []}
+                  melodySegments={analysisResults?.melody_analysis?.segments || []}
+                  tangoSections={analysisResults?.tango_structure?.sections || []}
+                  visualizationMode={visualizationMode}
+                  onSeek={handleSeek}
+                />
+              )}
+            </CardContent>
+          </Card>
+        )}
 
         {/* Analysis Results */}
         {analysisResults && (
@@ -414,25 +478,11 @@ function App() {
                   </TabsList>
                   
                   <TabsContent value="beats" className="space-y-4">
-                    <div className="space-y-2">
-                      <h4 className="font-medium">Beat Timeline</h4>
-                      <div className="max-h-64 overflow-y-auto space-y-1">
-                        {analysisResults.beat_analysis.beats.slice(0, 20).map((beat, idx) => (
-                          <div key={idx} className="flex justify-between items-center p-2 bg-slate-50 dark:bg-slate-800 rounded">
-                            <span className="text-sm">Beat {idx + 1}</span>
-                            <span className="text-sm">{beat.time.toFixed(2)}s</span>
-                            <Badge variant="secondary" className="text-xs">
-                              {(beat.confidence * 100).toFixed(0)}%
-                            </Badge>
-                          </div>
-                        ))}
-                        {analysisResults.beat_analysis.beats.length > 20 && (
-                          <p className="text-xs text-slate-500 text-center">
-                            ... and {analysisResults.beat_analysis.beats.length - 20} more beats
-                          </p>
-                        )}
-                      </div>
-                    </div>
+                    <BeatsList 
+                      beats={analysisResults.beat_analysis.beats}
+                      currentTime={currentTime}
+                      onBeatClick={handleBeatClick}
+                    />
                   </TabsContent>
                   
                   <TabsContent value="melody" className="space-y-4">
@@ -484,20 +534,6 @@ function App() {
                           ))}
                         </div>
                       </div>
-                      
-                      {analysisResults.tango_structure.phrases.length > 0 && (
-                        <div>
-                          <h4 className="font-medium mb-2">Phrases</h4>
-                          <div className="max-h-32 overflow-y-auto space-y-1">
-                            {analysisResults.tango_structure.phrases.slice(0, 8).map((phrase, idx) => (
-                              <div key={idx} className="flex justify-between items-center p-2 bg-slate-50 dark:bg-slate-800 rounded text-sm">
-                                <span>Section {phrase.section}, Phrase {phrase.phrase}</span>
-                                <span>{phrase.start.toFixed(1)}s - {phrase.end.toFixed(1)}s</span>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      )}
                     </div>
                   </TabsContent>
                 </Tabs>
