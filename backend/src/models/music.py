@@ -2,7 +2,8 @@ from flask_sqlalchemy import SQLAlchemy
 from datetime import datetime
 import json
 
-db = SQLAlchemy()
+# Import db from user.py to use the same instance
+from src.models.user import db
 
 class MusicUpload(db.Model):
     __tablename__ = 'music_uploads'

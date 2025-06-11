@@ -9,20 +9,18 @@ from werkzeug.utils import secure_filename
 from flask_cors import cross_origin
 import librosa
 import numpy as np
-from src.models.user import db
-from src.models.music import MusicUpload, AnalysisResult
+
+# Import models after Flask app is initialized
+def get_models():
+    from src.models.user import db
+    from src.models.music import MusicUpload, AnalysisResult
+    return db, MusicUpload, AnalysisResult
 
 music_bp = Blueprint('music', __name__)
 
 # Configuration
 ALLOWED_EXTENSIONS = {'mp3', 'wav', 'flac', 'm4a', 'aac', 'ogg'}
 MAX_FILE_SIZE = 50 * 1024 * 1024  # 50MB
-
-
-def get_models():
-    from src.models.user import db
-    from src.models.music import MusicUpload, AnalysisResult
-    return db, MusicUpload, AnalysisResult
 
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
@@ -241,6 +239,9 @@ def health_check():
 def upload_file():
     """Upload music file for analysis"""
     try:
+        # Get database models
+        db, MusicUpload, AnalysisResult = get_models()
+        
         if 'file' not in request.files:
             return jsonify({'error': 'No file provided'}), 400
         
@@ -303,6 +304,9 @@ def upload_file():
 def analyze_music(upload_id):
     """Analyze uploaded music file"""
     try:
+        # Get database models
+        db, MusicUpload, AnalysisResult = get_models()
+        
         # Find upload record
         upload_record = MusicUpload.query.filter_by(upload_id=upload_id).first()
         if not upload_record:
@@ -364,10 +368,14 @@ def analyze_music(upload_id):
         current_app.logger.error(f"Analysis error: {str(e)}")
         
         # Update status to error
-        upload_record = MusicUpload.query.filter_by(upload_id=upload_id).first()
-        if upload_record:
-            upload_record.status = 'error'
-            db.session.commit()
+        try:
+            db, MusicUpload, AnalysisResult = get_models()
+            upload_record = MusicUpload.query.filter_by(upload_id=upload_id).first()
+            if upload_record:
+                upload_record.status = 'error'
+                db.session.commit()
+        except:
+            pass
         
         return jsonify({'error': 'Analysis failed'}), 500
 
@@ -376,6 +384,9 @@ def analyze_music(upload_id):
 def get_results(upload_id):
     """Get analysis results for an upload"""
     try:
+        # Get database models
+        db, MusicUpload, AnalysisResult = get_models()
+        
         analysis_result = AnalysisResult.query.filter_by(upload_id=upload_id).first()
         if not analysis_result:
             return jsonify({'error': 'Results not found'}), 404
@@ -391,6 +402,9 @@ def get_results(upload_id):
 def list_uploads():
     """List all uploads"""
     try:
+        # Get database models
+        db, MusicUpload, AnalysisResult = get_models()
+        
         uploads = MusicUpload.query.order_by(MusicUpload.upload_time.desc()).limit(50).all()
         return jsonify([upload.to_dict() for upload in uploads]), 200
         
