@@ -5,24 +5,32 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 from flask import Flask, send_from_directory
 from flask_cors import CORS
-from src.models.user import db
-from src.routes.user import user_bp
-from src.routes.music import music_bp
 
 app = Flask(__name__, static_folder=os.path.join(os.path.dirname(__file__), 'static'))
 app.config['SECRET_KEY'] = 'asdf#FGSgvasgf$5$WGT'
-app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024  # 50MB max file size
 
 # Enable CORS for all routes
 CORS(app)
 
+# Database configuration - MUST be done before importing models
+app.config['SQLALCHEMY_DATABASE_URI'] = f"sqlite:///{os.path.join(os.path.dirname(__file__), 'database', 'app.db')}"
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+
+# Initialize database FIRST
+from src.models.user import db
+db.init_app(app)
+
+# Import models AFTER database initialization
+from src.models.music import MusicUpload, AnalysisResult
+
+# Import and register blueprints AFTER models
+from src.routes.user import user_bp
+from src.routes.music import music_bp
+
 app.register_blueprint(user_bp, url_prefix='/api')
 app.register_blueprint(music_bp, url_prefix='/api/music')
 
-# uncomment if you need to use database
-app.config['SQLALCHEMY_DATABASE_URI'] = f"sqlite:///{os.path.join(os.path.dirname(__file__), 'database', 'app.db')}"
-app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-db.init_app(app)
+# Create tables within app context
 with app.app_context():
     db.create_all()
 
@@ -44,4 +52,6 @@ def serve(path):
 
 
 if __name__ == '__main__':
+    # Use port 5000 for consistency
     app.run(host='0.0.0.0', port=5000, debug=True)
+

@@ -7,7 +7,7 @@ import { Badge } from '@/components/ui/badge.jsx'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs.jsx'
 import './App.css'
 
-const API_BASE_URL = 'http://localhost:5000/api/music'
+const API_BASE_URL = 'http://localhost:5001/api/music'
 
 function App() {
   const [file, setFile] = useState(null)
