@@ -6,15 +6,15 @@ import { Slider } from '@/components/ui/slider.jsx'
 import { Label } from '@/components/ui/label.jsx'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card.jsx'
 
-const FilteredMusicVisualizer = ({ 
-  audioRef, 
-  duration, 
-  currentTime, 
-  beats = [], 
-  melodySegments = [], 
+const FilteredMusicVisualizer = ({
+  audioRef,
+  duration,
+  currentTime,
+  beats = [],
+  melodySegments = [],
   tangoSections = [],
   visualizationMode = 'beats', // 'beats' or 'melody'
-  onSeek 
+  onSeek
 }) => {
   const canvasRef = useRef(null)
   const containerRef = useRef(null)
@@ -22,7 +22,7 @@ const FilteredMusicVisualizer = ({
   const [isHovering, setIsHovering] = useState(false)
   const [hoverTime, setHoverTime] = useState(0)
   const [zoomLevel, setZoomLevel] = useState(16) // seconds to show (default 16s = 8s past + 8s future)
-  
+
   // Filter states
   const [confidenceThreshold, setConfidenceThreshold] = useState([0]) // 0-100
   const [strengthThreshold, setStrengthThreshold] = useState([0]) // 0-100
@@ -53,11 +53,11 @@ const FilteredMusicVisualizer = ({
     if (zoomLevel === 'full') {
       return { start: 0, end: duration }
     }
-    
+
     const halfZoom = zoomLevel / 2
     const start = Math.max(0, currentTime - halfZoom)
     const end = Math.min(duration, currentTime + halfZoom)
-    
+
     // If we're near the beginning or end, adjust the window
     if (start === 0) {
       return { start: 0, end: Math.min(duration, zoomLevel) }
@@ -65,7 +65,7 @@ const FilteredMusicVisualizer = ({
     if (end === duration) {
       return { start: Math.max(0, duration - zoomLevel), end: duration }
     }
-    
+
     return { start, end }
   }
 
@@ -79,7 +79,7 @@ const FilteredMusicVisualizer = ({
         setCanvasWidth(containerRef.current.offsetWidth)
       }
     }
-    
+
     updateWidth()
     window.addEventListener('resize', updateWidth)
     return () => window.removeEventListener('resize', updateWidth)
@@ -113,7 +113,7 @@ const FilteredMusicVisualizer = ({
         ctx.moveTo(x, 0)
         ctx.lineTo(x, height - 30)
         ctx.stroke()
-        
+
         // Time labels
         ctx.fillStyle = '#64748b'
         ctx.font = '10px sans-serif'
@@ -143,7 +143,7 @@ const FilteredMusicVisualizer = ({
           const x = ((beat.time - windowStart) / windowDuration) * width
           const intensity = beat.confidence || 0.5
           const strength = beat.strength || beat.confidence || 0.5
-          
+
           // Beat line - stronger beats get thicker lines
           ctx.strokeStyle = `rgba(239, 68, 68, ${0.4 + intensity * 0.6})`
           ctx.lineWidth = 2 + strength * 3
@@ -164,11 +164,11 @@ const FilteredMusicVisualizer = ({
           ctx.textAlign = 'center'
           const originalBeatIndex = beats.indexOf(beat) + 1
           ctx.fillText(`${originalBeatIndex}`, x, 15)
-          
+
           ctx.font = '9px sans-serif'
           ctx.fillStyle = '#6b7280'
           ctx.fillText(`${Math.round(intensity * 100)}%`, x, height - 25)
-          
+
           // Strength indicator
           ctx.font = '8px sans-serif'
           ctx.fillStyle = '#059669'
@@ -181,7 +181,7 @@ const FilteredMusicVisualizer = ({
         beats.forEach(beat => {
           if (!filteredBeats.includes(beat) && beat.time >= windowStart && beat.time <= windowEnd) {
             const x = ((beat.time - windowStart) / windowDuration) * width
-            
+
             // Faded beat line
             ctx.strokeStyle = 'rgba(156, 163, 175, 0.3)'
             ctx.lineWidth = 1
@@ -201,24 +201,24 @@ const FilteredMusicVisualizer = ({
     } else if (visualizationMode === 'melody') {
       // Draw melody segments in visible window
       const centerY = height / 2
-      
+
       melodySegments.forEach((segment, index) => {
         // Check if segment overlaps with visible window
         if (segment.end >= windowStart && segment.start <= windowEnd) {
           const startX = Math.max(0, ((segment.start - windowStart) / windowDuration) * width)
           const endX = Math.min(width, ((segment.end - windowStart) / windowDuration) * width)
           const segmentWidth = endX - startX
-          
+
           if (segmentWidth < 1) return
 
           const intensity = segment.confidence || 0.5
-          
+
           if (segment.type === 'staccato') {
             // Spiky line for staccato - more detailed
             ctx.strokeStyle = `rgba(168, 85, 247, ${0.5 + intensity * 0.5})`
             ctx.lineWidth = 2
             ctx.beginPath()
-            
+
             const spikes = Math.max(5, Math.floor(segmentWidth / 5)) // More spikes for detail
             for (let i = 0; i <= spikes; i++) {
               const x = startX + (i / spikes) * segmentWidth
@@ -228,7 +228,7 @@ const FilteredMusicVisualizer = ({
               else ctx.lineTo(x, y)
             }
             ctx.stroke()
-            
+
             // Add staccato markers
             for (let i = 0; i <= spikes; i += 2) {
               const x = startX + (i / spikes) * segmentWidth
@@ -242,10 +242,10 @@ const FilteredMusicVisualizer = ({
             ctx.strokeStyle = `rgba(34, 197, 94, ${0.5 + intensity * 0.5})`
             ctx.lineWidth = 3
             ctx.beginPath()
-            
+
             const amplitude = 15 + intensity * 20
             const frequency = 0.1 // Higher frequency for more detail
-            
+
             for (let x = startX; x <= endX; x += 1) {
               const progress = (x - startX) / segmentWidth
               const y = centerY + Math.sin(progress * Math.PI * 4 + segment.start) * amplitude
@@ -256,8 +256,8 @@ const FilteredMusicVisualizer = ({
           }
 
           // Segment background
-          ctx.fillStyle = segment.type === 'staccato' 
-            ? `rgba(168, 85, 247, 0.1)` 
+          ctx.fillStyle = segment.type === 'staccato'
+            ? `rgba(168, 85, 247, 0.1)`
             : `rgba(34, 197, 94, 0.1)`
           ctx.fillRect(startX, 20, segmentWidth, height - 50)
 
@@ -306,7 +306,7 @@ const FilteredMusicVisualizer = ({
 
   const handleMouseMove = (e) => {
     if (!containerRef.current || windowDuration === 0) return
-    
+
     const rect = containerRef.current.getBoundingClientRect()
     const x = e.clientX - rect.left
     const time = windowStart + (x / canvasWidth) * windowDuration
@@ -315,7 +315,7 @@ const FilteredMusicVisualizer = ({
 
   const handleClick = (e) => {
     if (!containerRef.current || windowDuration === 0) return
-    
+
     const rect = containerRef.current.getBoundingClientRect()
     const x = e.clientX - rect.left
     const time = windowStart + (x / canvasWidth) * windowDuration
@@ -347,7 +347,7 @@ const FilteredMusicVisualizer = ({
             <ZoomIn className="h-4 w-4 text-gray-600" />
             <span className="text-sm font-medium text-gray-700">Zoom:</span>
           </div>
-          
+
           <div className="flex items-center space-x-2">
             {zoomOptions.map((option) => (
               <Button
@@ -444,7 +444,7 @@ const FilteredMusicVisualizer = ({
                   </span>
                 )}
               </div>
-              
+
               <Button
                 variant="outline"
                 size="sm"
@@ -460,7 +460,7 @@ const FilteredMusicVisualizer = ({
       )}
 
       {/* Visualization */}
-      <div 
+      <div
         ref={containerRef}
         className="relative cursor-pointer"
         onMouseMove={handleMouseMove}
@@ -474,10 +474,10 @@ const FilteredMusicVisualizer = ({
           height={200}
           className="w-full border border-gray-200 rounded-lg bg-gray-50"
         />
-        
+
         {/* Time tooltip */}
         {isHovering && hoverTime >= windowStart && hoverTime <= windowEnd && (
-          <div 
+          <div
             className="absolute top-0 bg-gray-800 text-white px-2 py-1 rounded text-xs pointer-events-none transform -translate-x-1/2 z-10"
             style={{ left: `${((hoverTime - windowStart) / windowDuration) * 100}%` }}
           >
@@ -495,13 +495,12 @@ const FilteredMusicVisualizer = ({
               const startPercent = Math.max(0, ((section.start - windowStart) / windowDuration) * 100)
               const endPercent = Math.min(100, ((section.end - windowStart) / windowDuration) * 100)
               const widthPercent = endPercent - startPercent
-              
+
               return (
                 <div
                   key={index}
-                  className={`absolute h-full flex items-center justify-center text-sm font-bold text-white ${
-                    section.type === 'A' ? 'bg-blue-500' : 'bg-purple-500'
-                  }`}
+                  className={`absolute h-full flex items-center justify-center text-sm font-bold text-white ${section.type === 'A' ? 'bg-blue-500' : 'bg-purple-500'
+                    }`}
                   style={{
                     left: `${startPercent}%`,
                     width: `${widthPercent}%`
@@ -513,10 +512,10 @@ const FilteredMusicVisualizer = ({
             }
             return null
           })}
-          
+
           {/* Current position indicator */}
           {currentTime >= windowStart && currentTime <= windowEnd && (
-            <div 
+            <div
               className="absolute top-0 w-1 h-full bg-gray-800 pointer-events-none z-10"
               style={{ left: `${((currentTime - windowStart) / windowDuration) * 100}%` }}
             />
