@@ -18,22 +18,41 @@ const BeatsList = ({ beats = [], currentTime, onBeatClick }) => {
 
   const currentBeatIndex = getCurrentBeatIndex()
 
+  // Show beats around current time for better context
+  const getVisibleBeats = () => {
+    const visibleRange = 20 // Show 20 beats around current
+    const start = Math.max(0, currentBeatIndex - 10)
+    const end = Math.min(beats.length, start + visibleRange)
+    return beats.slice(start, end).map((beat, index) => ({
+      ...beat,
+      originalIndex: start + index
+    }))
+  }
+
+  const visibleBeats = getVisibleBeats()
+
   return (
     <div className="space-y-2">
-      <h3 className="text-lg font-semibold text-gray-900">Beat Timeline</h3>
+      <div className="flex justify-between items-center">
+        <h3 className="text-lg font-semibold text-gray-900">Beat Timeline</h3>
+        <div className="text-sm text-gray-500">
+          Showing beats around current position
+        </div>
+      </div>
+      
       <div className="max-h-96 overflow-y-auto border border-gray-200 rounded-lg">
         <div className="grid grid-cols-1 gap-1 p-2">
-          {beats.map((beat, index) => {
-            const isActive = index === currentBeatIndex
+          {visibleBeats.map((beat) => {
+            const isActive = beat.originalIndex === currentBeatIndex
             const isPast = beat.time < currentTime
             const confidencePercent = Math.round((beat.confidence || 0) * 100)
             
             return (
               <div
-                key={index}
+                key={beat.originalIndex}
                 className={`flex items-center justify-between p-3 rounded-lg cursor-pointer transition-all duration-200 ${
                   isActive 
-                    ? 'bg-blue-100 border-2 border-blue-500 shadow-md' 
+                    ? 'bg-blue-100 border-2 border-blue-500 shadow-md scale-105' 
                     : isPast 
                     ? 'bg-gray-50 hover:bg-gray-100' 
                     : 'bg-white hover:bg-gray-50 border border-gray-200'
@@ -49,7 +68,7 @@ const BeatsList = ({ beats = [], currentTime, onBeatClick }) => {
                     <span className={`font-medium ${
                       isActive ? 'text-blue-900' : 'text-gray-900'
                     }`}>
-                      Beat {index + 1}
+                      Beat {beat.originalIndex + 1}
                     </span>
                     <div className="text-sm text-gray-500">
                       {formatTime(beat.time)}

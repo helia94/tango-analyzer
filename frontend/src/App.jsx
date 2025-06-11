@@ -1,5 +1,5 @@
 import { useState, useRef } from 'react'
-import { Upload, Music, Activity, BarChart3, Download, Play, Pause, Volume2, Eye, Waves } from 'lucide-react'
+import { Upload, Music, Activity, BarChart3, Download, Play, Pause, Volume2, Eye, Waves, ZoomIn } from 'lucide-react'
 import { Button } from '@/components/ui/button.jsx'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card.jsx'
 import { Progress } from '@/components/ui/progress.jsx'
@@ -7,7 +7,7 @@ import { Badge } from '@/components/ui/badge.jsx'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs.jsx'
 import { Switch } from '@/components/ui/switch.jsx'
 import { Label } from '@/components/ui/label.jsx'
-import MusicVisualizer from '@/components/MusicVisualizer.jsx'
+import ZoomedMusicVisualizer from '@/components/ZoomedMusicVisualizer.jsx'
 import BeatsList from '@/components/BeatsList.jsx'
 import './App.css'
 
@@ -210,8 +210,14 @@ function App() {
             Argentine Tango Music Analyzer
           </h1>
           <p className="text-lg text-slate-600 dark:text-slate-400">
-            Advanced beat detection and melody analysis with real-time visualization
+            Detailed beat detection and melody analysis with zoomed visualization
           </p>
+          <div className="flex items-center justify-center gap-2 mt-2">
+            <ZoomIn className="h-5 w-5 text-blue-500" />
+            <Badge variant="secondary" className="text-sm">
+              16-second detailed view with auto-scroll
+            </Badge>
+          </div>
         </div>
 
         {/* File Upload Section */}
@@ -222,7 +228,7 @@ function App() {
               Upload Tango Music
             </CardTitle>
             <CardDescription>
-              Upload your Argentine tango music file for analysis (MP3, WAV, FLAC, M4A, AAC, OGG)
+              Upload your Argentine tango music file for detailed analysis (MP3, WAV, FLAC, M4A, AAC, OGG)
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -298,14 +304,14 @@ function App() {
           </CardContent>
         </Card>
 
-        {/* Music Player and Visualization */}
+        {/* Music Player and Detailed Visualization */}
         {audioUrl && (
           <Card className="mb-8">
             <CardHeader>
               <div className="flex justify-between items-center">
                 <CardTitle className="flex items-center gap-2">
                   <Volume2 className="h-5 w-5" />
-                  Music Player & Visualization
+                  Detailed Music Visualization
                 </CardTitle>
                 
                 {analysisResults && (
@@ -324,6 +330,10 @@ function App() {
                   </div>
                 )}
               </div>
+              <CardDescription>
+                Zoomed view showing 16 seconds (8s past + 8s future) with auto-scroll. 
+                Use zoom controls to adjust the time window.
+              </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               <audio
@@ -345,11 +355,15 @@ function App() {
                   {isPlaying ? <Pause className="h-5 w-5" /> : <Play className="h-5 w-5" />}
                   {isPlaying ? 'Pause' : 'Play'}
                 </Button>
+                
+                <div className="text-sm text-gray-600">
+                  {formatTime(currentTime)} / {formatTime(duration)}
+                </div>
               </div>
 
-              {/* Music Visualization */}
+              {/* Detailed Music Visualization */}
               {duration > 0 && (
-                <MusicVisualizer
+                <ZoomedMusicVisualizer
                   audioRef={audioRef}
                   duration={duration}
                   currentTime={currentTime}
