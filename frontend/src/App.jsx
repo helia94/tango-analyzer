@@ -372,7 +372,7 @@ function App() {
                   currentTime={currentTime}
                   beats={analysisResults?.beat_analysis?.beats || []}
                   melodySegments={analysisResults?.melody_analysis?.segments || []}
-                  tangoSections={analysisResults?.tango_structure?.sections || []}
+                  tangoSections={analysisResults?.section_analysis?.sections || []}
                   visualizationMode={visualizationMode}
                   onSeek={handleSeek}
                 />
@@ -443,13 +443,13 @@ function App() {
                 </CardHeader>
                 <CardContent>
                   <div className="text-2xl font-bold">
-                    {analysisResults.tango_structure.sections.length} Sections
+                    {analysisResults.section_analysis.sections.length} Sections
                   </div>
                   <p className="text-xs text-slate-500">
-                    {analysisResults.tango_structure.time_signature} time signature
+                    {analysisResults.time_signature} time signature
                   </p>
                   <div className="flex gap-1 mt-2">
-                    {analysisResults.tango_structure.sections.map((section, idx) => (
+                    {analysisResults.section_analysis.sections.map((section, idx) => (
                       <Badge key={idx} variant="outline" className="text-xs">
                         {section.type}
                       </Badge>
@@ -536,7 +536,7 @@ function App() {
                       <div>
                         <h4 className="font-medium mb-2">Sections</h4>
                         <div className="space-y-2">
-                          {analysisResults.tango_structure.sections.map((section, idx) => (
+                          {analysisResults.section_analysis.sections.map((section, idx) => (
                             <div key={idx} className="flex justify-between items-center p-3 bg-slate-50 dark:bg-slate-800 rounded">
                               <div>
                                 <span className="font-medium">Section {section.type}</span>

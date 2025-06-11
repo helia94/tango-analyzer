@@ -1,14 +1,21 @@
+"""
+Refactored Music Analysis REST API
+
+This module provides REST API endpoints for music analysis using the MusicAnalyzer logic layer.
+The API is separated from the business logic for better maintainability and testability.
+"""
+
 import os
 import uuid
-import time
 import json
 import tempfile
 from datetime import datetime
 from flask import Blueprint, request, jsonify, current_app
 from werkzeug.utils import secure_filename
 from flask_cors import cross_origin
-import librosa
-import numpy as np
+
+# Import the logic layer
+from src.routes.music_analyzer_logic import MusicAnalyzer, CompleteAnalysisResult
 
 # Import models after Flask app is initialized
 def get_models():
@@ -22,206 +29,184 @@ music_bp = Blueprint('music', __name__)
 ALLOWED_EXTENSIONS = {'mp3', 'wav', 'flac', 'm4a', 'aac', 'ogg'}
 MAX_FILE_SIZE = 50 * 1024 * 1024  # 50MB
 
-def allowed_file(filename):
-    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
-def analyze_beats(audio_path):
-    """Analyze beats using librosa"""
-    try:
-        # Load audio file
-        y, sr = librosa.load(audio_path)
+class MusicAnalysisAPI:
+    """
+    REST API handler class for music analysis endpoints.
+    
+    This class provides a clean interface between the REST API and the MusicAnalyzer logic layer.
+    """
+    
+    @staticmethod
+    def allowed_file(filename: str) -> bool:
+        """Check if the uploaded file has an allowed extension"""
+        return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+    
+    @staticmethod
+    def validate_file_upload(file) -> tuple:
+        """
+        Validate uploaded file for size and type.
         
-        # Beat tracking
-        tempo, beats = librosa.beat.beat_track(y=y, sr=sr, units='time')
+        Returns:
+            tuple: (is_valid, error_message, file_size)
+        """
+        if not file or file.filename == '':
+            return False, 'No file selected', 0
         
-        # Calculate beat confidence (simplified)
-        onset_envelope = librosa.onset.onset_strength(y=y, sr=sr)
-        beat_frames = librosa.time_to_frames(beats, sr=sr)
+        if not MusicAnalysisAPI.allowed_file(file.filename):
+            return False, 'File type not allowed', 0
         
-        # Get confidence scores for each beat
-        confidences = []
-        for frame in beat_frames:
-            if frame < len(onset_envelope):
-                confidences.append(float(onset_envelope[frame]))
-            else:
-                confidences.append(0.5)
+        # Check file size
+        file.seek(0, os.SEEK_END)
+        file_size = file.tell()
+        file.seek(0)
         
-        # Normalize confidences
-        if confidences:
-            max_conf = max(confidences)
-            confidences = [c / max_conf for c in confidences]
+        if file_size > MAX_FILE_SIZE:
+            return False, 'File too large', file_size
         
-        # Create beat data
-        beats_data = []
-        for i, (beat_time, confidence) in enumerate(zip(beats, confidences)):
-            beats_data.append({
-                'time': float(beat_time),
-                'confidence': float(confidence),
-                'strength': float(confidence)  # For compatibility
-            })
+        return True, '', file_size
+    
+    @staticmethod
+    def save_uploaded_file(file, upload_id: str) -> tuple:
+        """
+        Save uploaded file to temporary directory.
         
-        return {
-            'bpm': float(tempo),
-            'beats': beats_data,
-            'method': 'librosa',
-            'confidence': float(np.mean(confidences)) if confidences else 0.0
-        }
+        Returns:
+            tuple: (success, file_path, filename)
+        """
+        try:
+            # Secure filename
+            filename = secure_filename(file.filename)
+            if not filename:
+                filename = f"upload_{upload_id}.mp3"
+            
+            # Create uploads directory
+            upload_dir = os.path.join(tempfile.gettempdir(), 'tango_uploads')
+            os.makedirs(upload_dir, exist_ok=True)
+            
+            # Save file
+            final_filename = f"{upload_id}_{filename}"
+            file_path = os.path.join(upload_dir, final_filename)
+            file.save(file_path)
+            
+            return True, file_path, final_filename
+            
+        except Exception as e:
+            current_app.logger.error(f"File save error: {str(e)}")
+            return False, '', ''
+    
+    @staticmethod
+    def create_upload_record(upload_id: str, filename: str, original_filename: str, 
+                           file_size: int, content_type: str) -> bool:
+        """Create database record for uploaded file"""
+        try:
+            db, MusicUpload, AnalysisResult = get_models()
+            
+            upload_record = MusicUpload(
+                upload_id=upload_id,
+                filename=filename,
+                original_filename=original_filename,
+                file_size=file_size,
+                file_type=content_type or 'audio/mpeg'
+            )
+            
+            db.session.add(upload_record)
+            db.session.commit()
+            return True
+            
+        except Exception as e:
+            current_app.logger.error(f"Database error: {str(e)}")
+            return False
+    
+    @staticmethod
+    def perform_analysis(file_path: str) -> tuple:
+        """
+        Perform complete music analysis using the MusicAnalyzer logic layer.
         
-    except Exception as e:
-        current_app.logger.error(f"Beat analysis error: {str(e)}")
-        return {
-            'bpm': 120.0,  # Default tango BPM
-            'beats': [],
-            'method': 'fallback',
-            'confidence': 0.0
-        }
+        Returns:
+            tuple: (success, analysis_result_dict, error_message)
+        """
+        try:
+            # Initialize the analyzer
+            analyzer = MusicAnalyzer(file_path)
+            
+            # Perform complete analysis (beat -> melody -> sections)
+            analysis_result = analyzer.analyze_complete()
+            
+            # Convert to dictionary format
+            result_dict = analyzer.to_dict(analysis_result)
+            
+            return True, result_dict, ''
+            
+        except Exception as e:
+            error_msg = f"Analysis failed: {str(e)}"
+            current_app.logger.error(error_msg)
+            return False, {}, error_msg
+    
+    @staticmethod
+    def save_analysis_results(upload_id: str, analysis_dict: dict, processing_duration: float) -> bool:
+        """Save analysis results to database"""
+        try:
+            db, MusicUpload, AnalysisResult = get_models()
+            
+            # Extract data from analysis dictionary
+            beat_analysis = analysis_dict.get('beat_analysis', {})
+            melody_analysis = analysis_dict.get('melody_analysis', {})
+            section_analysis = analysis_dict.get('section_analysis', {})
+            
+            analysis_result = AnalysisResult(
+                upload_id=upload_id,
+                bpm=beat_analysis.get('bpm', 120.0),
+                beat_count=beat_analysis.get('total_beats', 0),
+                beat_confidence=beat_analysis.get('confidence', 0.0),
+                beat_method=beat_analysis.get('method', 'fallback'),
+                beats_data=json.dumps(beat_analysis.get('beats', [])),
+                legato_percentage=melody_analysis.get('statistics', {}).get('legato_percentage', 50.0),
+                staccato_percentage=melody_analysis.get('statistics', {}).get('staccato_percentage', 50.0),
+                melody_segments_count=melody_analysis.get('statistics', {}).get('total_segments', 0),
+                melody_data=json.dumps(melody_analysis.get('segments', [])),
+                time_signature=section_analysis.get('time_signature', '2/4'),
+                sections_count=section_analysis.get('section_count', 0),
+                structure_data=json.dumps(section_analysis.get('sections', [])),
+                processing_duration=processing_duration
+            )
+            
+            db.session.add(analysis_result)
+            db.session.commit()
+            return True
+            
+        except Exception as e:
+            current_app.logger.error(f"Save results error: {str(e)}")
+            return False
+    
+    @staticmethod
+    def update_upload_status(upload_id: str, status: str) -> bool:
+        """Update upload status in database"""
+        try:
+            db, MusicUpload, AnalysisResult = get_models()
+            
+            upload_record = MusicUpload.query.filter_by(upload_id=upload_id).first()
+            if upload_record:
+                upload_record.status = status
+                db.session.commit()
+                return True
+            return False
+            
+        except Exception as e:
+            current_app.logger.error(f"Status update error: {str(e)}")
+            return False
+    
+    @staticmethod
+    def cleanup_file(file_path: str) -> None:
+        """Clean up temporary file"""
+        try:
+            if os.path.exists(file_path):
+                os.remove(file_path)
+        except Exception as e:
+            current_app.logger.warning(f"File cleanup warning: {str(e)}")
 
-def analyze_melody(audio_path):
-    """Analyze melody for legato/staccato classification"""
-    try:
-        # Load audio file
-        y, sr = librosa.load(audio_path)
-        
-        # Onset detection
-        onsets = librosa.onset.onset_detect(y=y, sr=sr, units='time')
-        
-        # Calculate onset intervals
-        if len(onsets) < 2:
-            return {
-                'segments': [],
-                'statistics': {
-                    'legato_percentage': 50.0,
-                    'staccato_percentage': 50.0,
-                    'total_segments': 0
-                }
-            }
-        
-        intervals = np.diff(onsets)
-        
-        # Classify segments based on onset intervals
-        # Shorter intervals = staccato, longer intervals = legato
-        median_interval = np.median(intervals)
-        
-        segments = []
-        legato_count = 0
-        staccato_count = 0
-        
-        for i in range(len(onsets) - 1):
-            start_time = onsets[i]
-            end_time = onsets[i + 1]
-            interval = intervals[i]
-            
-            # Classification logic
-            if interval > median_interval:
-                segment_type = 'legato'
-                legato_count += 1
-            else:
-                segment_type = 'staccato'
-                staccato_count += 1
-            
-            # Confidence based on how far from median
-            confidence = min(1.0, abs(interval - median_interval) / median_interval + 0.5)
-            
-            segments.append({
-                'start': float(start_time),
-                'end': float(end_time),
-                'type': segment_type,
-                'confidence': float(confidence)
-            })
-        
-        total_segments = len(segments)
-        legato_percentage = (legato_count / total_segments * 100) if total_segments > 0 else 50.0
-        staccato_percentage = (staccato_count / total_segments * 100) if total_segments > 0 else 50.0
-        
-        return {
-            'segments': segments,
-            'statistics': {
-                'legato_percentage': float(legato_percentage),
-                'staccato_percentage': float(staccato_percentage),
-                'total_segments': total_segments
-            }
-        }
-        
-    except Exception as e:
-        current_app.logger.error(f"Melody analysis error: {str(e)}")
-        return {
-            'segments': [],
-            'statistics': {
-                'legato_percentage': 50.0,
-                'staccato_percentage': 50.0,
-                'total_segments': 0
-            }
-        }
 
-def analyze_tango_structure(audio_path):
-    """Analyze tango musical structure"""
-    try:
-        # Load audio file
-        y, sr = librosa.load(audio_path)
-        
-        # Estimate tempo and time signature
-        tempo, _ = librosa.beat.beat_track(y=y, sr=sr)
-        
-        # Tango is typically in 2/4 or 4/4 time
-        time_signature = "2/4" if tempo > 100 else "4/4"
-        
-        # Simple section detection based on spectral changes
-        # This is a simplified approach - real tango analysis would be more complex
-        duration = librosa.get_duration(y=y, sr=sr)
-        
-        # Create basic A-B-A structure (common in tango)
-        sections = []
-        if duration > 60:  # If song is longer than 1 minute
-            sections = [
-                {
-                    'type': 'A',
-                    'start': 0.0,
-                    'end': duration * 0.3,
-                    'description': 'opening_theme'
-                },
-                {
-                    'type': 'B',
-                    'start': duration * 0.3,
-                    'end': duration * 0.7,
-                    'description': 'contrasting_section'
-                },
-                {
-                    'type': 'A',
-                    'start': duration * 0.7,
-                    'end': duration,
-                    'description': 'return_theme'
-                }
-            ]
-        else:
-            sections = [
-                {
-                    'type': 'A',
-                    'start': 0.0,
-                    'end': duration,
-                    'description': 'main_theme'
-                }
-            ]
-        
-        return {
-            'time_signature': time_signature,
-            'sections': sections,
-            'phrases': []  # Could be extended with phrase detection
-        }
-        
-    except Exception as e:
-        current_app.logger.error(f"Structure analysis error: {str(e)}")
-        return {
-            'time_signature': '2/4',
-            'sections': [
-                {
-                    'type': 'A',
-                    'start': 0.0,
-                    'end': 180.0,
-                    'description': 'main_theme'
-                }
-            ],
-            'phrases': []
-        }
+# ==================== REST API ENDPOINTS ====================
 
 @music_bp.route('/health', methods=['GET'])
 @cross_origin()
@@ -230,67 +215,46 @@ def health_check():
     return jsonify({
         'status': 'healthy',
         'service': 'tango-music-analyzer',
-        'version': '1.0.0',
-        'librosa_available': True
+        'version': '2.0.0',
+        'librosa_available': True,
+        'logic_layer': 'MusicAnalyzer'
     })
+
 
 @music_bp.route('/upload', methods=['POST'])
 @cross_origin()
 def upload_file():
     """Upload music file for analysis"""
     try:
-        # Get database models
-        db, MusicUpload, AnalysisResult = get_models()
-        
         if 'file' not in request.files:
             return jsonify({'error': 'No file provided'}), 400
         
         file = request.files['file']
-        if file.filename == '':
-            return jsonify({'error': 'No file selected'}), 400
         
-        if not allowed_file(file.filename):
-            return jsonify({'error': 'File type not allowed'}), 400
-        
-        # Check file size
-        file.seek(0, os.SEEK_END)
-        file_size = file.tell()
-        file.seek(0)
-        
-        if file_size > MAX_FILE_SIZE:
-            return jsonify({'error': 'File too large'}), 400
+        # Validate file
+        is_valid, error_msg, file_size = MusicAnalysisAPI.validate_file_upload(file)
+        if not is_valid:
+            return jsonify({'error': error_msg}), 400
         
         # Generate unique upload ID
         upload_id = str(uuid.uuid4())
         
-        # Secure filename
-        filename = secure_filename(file.filename)
-        if not filename:
-            filename = f"upload_{upload_id}.mp3"
-        
-        # Create uploads directory
-        upload_dir = os.path.join(tempfile.gettempdir(), 'tango_uploads')
-        os.makedirs(upload_dir, exist_ok=True)
-        
         # Save file
-        file_path = os.path.join(upload_dir, f"{upload_id}_{filename}")
-        file.save(file_path)
+        success, file_path, filename = MusicAnalysisAPI.save_uploaded_file(file, upload_id)
+        if not success:
+            return jsonify({'error': 'Failed to save file'}), 500
         
         # Create database record
-        upload_record = MusicUpload(
-            upload_id=upload_id,
-            filename=f"{upload_id}_{filename}",
-            original_filename=file.filename,
-            file_size=file_size,
-            file_type=file.content_type or 'audio/mpeg'
+        success = MusicAnalysisAPI.create_upload_record(
+            upload_id, filename, file.filename, file_size, file.content_type
         )
-        
-        db.session.add(upload_record)
-        db.session.commit()
+        if not success:
+            MusicAnalysisAPI.cleanup_file(file_path)
+            return jsonify({'error': 'Failed to create upload record'}), 500
         
         return jsonify({
             'upload_id': upload_id,
-            'filename': filename,
+            'filename': file.filename,
             'file_size': file_size,
             'status': 'uploaded'
         }), 200
@@ -299,22 +263,69 @@ def upload_file():
         current_app.logger.error(f"Upload error: {str(e)}")
         return jsonify({'error': 'Upload failed'}), 500
 
+
 @music_bp.route('/analyze/<upload_id>', methods=['POST'])
 @cross_origin()
 def analyze_music(upload_id):
-    """Analyze uploaded music file"""
+    """Analyze uploaded music file using the MusicAnalyzer logic layer"""
     try:
-        # Get database models
-        db, MusicUpload, AnalysisResult = get_models()
-        
         # Find upload record
+        db, MusicUpload, AnalysisResult = get_models()
         upload_record = MusicUpload.query.filter_by(upload_id=upload_id).first()
         if not upload_record:
             return jsonify({'error': 'Upload not found'}), 404
         
-        # Update status
-        upload_record.status = 'analyzing'
-        db.session.commit()
+        # Update status to analyzing
+        MusicAnalysisAPI.update_upload_status(upload_id, 'analyzing')
+        
+        # Get file path
+        upload_dir = os.path.join(tempfile.gettempdir(), 'tango_uploads')
+        file_path = os.path.join(upload_dir, upload_record.filename)
+        
+        if not os.path.exists(file_path):
+            MusicAnalysisAPI.update_upload_status(upload_id, 'error')
+            return jsonify({'error': 'File not found'}), 404
+        
+        # Perform analysis using logic layer
+        success, analysis_dict, error_msg = MusicAnalysisAPI.perform_analysis(file_path)
+        
+        if not success:
+            MusicAnalysisAPI.update_upload_status(upload_id, 'error')
+            return jsonify({'error': error_msg}), 500
+        
+        # Save analysis results
+        processing_duration = analysis_dict.get('processing_duration', 0.0)
+        success = MusicAnalysisAPI.save_analysis_results(upload_id, analysis_dict, processing_duration)
+        
+        if not success:
+            MusicAnalysisAPI.update_upload_status(upload_id, 'error')
+            return jsonify({'error': 'Failed to save analysis results'}), 500
+        
+        # Update status to completed
+        MusicAnalysisAPI.update_upload_status(upload_id, 'completed')
+        
+        # Clean up file
+        MusicAnalysisAPI.cleanup_file(file_path)
+        
+        # Return analysis results
+        return jsonify(analysis_dict), 200
+        
+    except Exception as e:
+        current_app.logger.error(f"Analysis error: {str(e)}")
+        MusicAnalysisAPI.update_upload_status(upload_id, 'error')
+        return jsonify({'error': 'Analysis failed'}), 500
+
+
+@music_bp.route('/analyze/<upload_id>/beat', methods=['POST'])
+@cross_origin()
+def analyze_beat_only(upload_id):
+    """Analyze only the beat component of uploaded music file"""
+    try:
+        # Find upload record
+        db, MusicUpload, AnalysisResult = get_models()
+        upload_record = MusicUpload.query.filter_by(upload_id=upload_id).first()
+        if not upload_record:
+            return jsonify({'error': 'Upload not found'}), 404
         
         # Get file path
         upload_dir = os.path.join(tempfile.gettempdir(), 'tango_uploads')
@@ -323,68 +334,135 @@ def analyze_music(upload_id):
         if not os.path.exists(file_path):
             return jsonify({'error': 'File not found'}), 404
         
-        start_time = time.time()
+        # Perform beat analysis only
+        analyzer = MusicAnalyzer(file_path)
+        beat_result = analyzer.analyze_beats()
         
-        # Perform analysis
-        beat_analysis = analyze_beats(file_path)
-        melody_analysis = analyze_melody(file_path)
-        structure_analysis = analyze_tango_structure(file_path)
+        # Convert to dictionary
+        beat_dict = {
+            'bpm': beat_result.bpm,
+            'beats': [
+                {
+                    'time': beat.time,
+                    'confidence': beat.confidence,
+                    'strength': beat.strength
+                }
+                for beat in beat_result.beats
+            ],
+            'method': beat_result.method.value,
+            'confidence': beat_result.confidence,
+            'total_beats': beat_result.total_beats
+        }
         
-        processing_duration = time.time() - start_time
-        
-        # Save analysis results
-        analysis_result = AnalysisResult(
-            upload_id=upload_id,
-            bpm=beat_analysis['bpm'],
-            beat_count=len(beat_analysis['beats']),
-            beat_confidence=beat_analysis['confidence'],
-            beat_method=beat_analysis['method'],
-            beats_data=json.dumps(beat_analysis['beats']),
-            legato_percentage=melody_analysis['statistics']['legato_percentage'],
-            staccato_percentage=melody_analysis['statistics']['staccato_percentage'],
-            melody_segments_count=melody_analysis['statistics']['total_segments'],
-            melody_data=json.dumps(melody_analysis['segments']),
-            time_signature=structure_analysis['time_signature'],
-            sections_count=len(structure_analysis['sections']),
-            structure_data=json.dumps(structure_analysis['sections']),
-            processing_duration=processing_duration
-        )
-        
-        db.session.add(analysis_result)
-        
-        # Update upload status
-        upload_record.status = 'completed'
-        db.session.commit()
-        
-        # Clean up file
-        try:
-            os.remove(file_path)
-        except:
-            pass
-        
-        return jsonify(analysis_result.to_dict()), 200
+        return jsonify({'beat_analysis': beat_dict}), 200
         
     except Exception as e:
-        current_app.logger.error(f"Analysis error: {str(e)}")
+        current_app.logger.error(f"Beat analysis error: {str(e)}")
+        return jsonify({'error': 'Beat analysis failed'}), 500
+
+
+@music_bp.route('/analyze/<upload_id>/melody', methods=['POST'])
+@cross_origin()
+def analyze_melody_only(upload_id):
+    """Analyze only the melody component of uploaded music file"""
+    try:
+        # Find upload record
+        db, MusicUpload, AnalysisResult = get_models()
+        upload_record = MusicUpload.query.filter_by(upload_id=upload_id).first()
+        if not upload_record:
+            return jsonify({'error': 'Upload not found'}), 404
         
-        # Update status to error
-        try:
-            db, MusicUpload, AnalysisResult = get_models()
-            upload_record = MusicUpload.query.filter_by(upload_id=upload_id).first()
-            if upload_record:
-                upload_record.status = 'error'
-                db.session.commit()
-        except:
-            pass
+        # Get file path
+        upload_dir = os.path.join(tempfile.gettempdir(), 'tango_uploads')
+        file_path = os.path.join(upload_dir, upload_record.filename)
         
-        return jsonify({'error': 'Analysis failed'}), 500
+        if not os.path.exists(file_path):
+            return jsonify({'error': 'File not found'}), 404
+        
+        # Perform melody analysis only
+        analyzer = MusicAnalyzer(file_path)
+        melody_result = analyzer.analyze_melody()
+        
+        # Convert to dictionary
+        melody_dict = {
+            'segments': [
+                {
+                    'start': seg.start,
+                    'end': seg.end,
+                    'type': seg.segment_type.value,
+                    'confidence': seg.confidence,
+                    'duration': seg.duration
+                }
+                for seg in melody_result.segments
+            ],
+            'statistics': {
+                'legato_percentage': melody_result.statistics.legato_percentage,
+                'staccato_percentage': melody_result.statistics.staccato_percentage,
+                'total_segments': melody_result.statistics.total_segments,
+                'average_segment_duration': melody_result.statistics.average_segment_duration,
+                'median_interval': melody_result.statistics.median_interval
+            }
+        }
+        
+        return jsonify({'melody_analysis': melody_dict}), 200
+        
+    except Exception as e:
+        current_app.logger.error(f"Melody analysis error: {str(e)}")
+        return jsonify({'error': 'Melody analysis failed'}), 500
+
+
+@music_bp.route('/analyze/<upload_id>/sections', methods=['POST'])
+@cross_origin()
+def analyze_sections_only(upload_id):
+    """Analyze only the sections component of uploaded music file"""
+    try:
+        # Find upload record
+        db, MusicUpload, AnalysisResult = get_models()
+        upload_record = MusicUpload.query.filter_by(upload_id=upload_id).first()
+        if not upload_record:
+            return jsonify({'error': 'Upload not found'}), 404
+        
+        # Get file path
+        upload_dir = os.path.join(tempfile.gettempdir(), 'tango_uploads')
+        file_path = os.path.join(upload_dir, upload_record.filename)
+        
+        if not os.path.exists(file_path):
+            return jsonify({'error': 'File not found'}), 404
+        
+        # Perform section analysis only
+        analyzer = MusicAnalyzer(file_path)
+        section_result = analyzer.analyze_sections()
+        
+        # Convert to dictionary
+        section_dict = {
+            'time_signature': section_result.time_signature,
+            'sections': [
+                {
+                    'type': sec.section_type.value,
+                    'start': sec.start,
+                    'end': sec.end,
+                    'duration': sec.duration,
+                    'description': sec.description
+                }
+                for sec in section_result.sections
+            ],
+            'phrases': section_result.phrases,
+            'total_duration': section_result.total_duration,
+            'section_count': section_result.section_count
+        }
+        
+        return jsonify({'section_analysis': section_dict}), 200
+        
+    except Exception as e:
+        current_app.logger.error(f"Section analysis error: {str(e)}")
+        return jsonify({'error': 'Section analysis failed'}), 500
+
 
 @music_bp.route('/results/<upload_id>', methods=['GET'])
 @cross_origin()
 def get_results(upload_id):
     """Get analysis results for an upload"""
     try:
-        # Get database models
         db, MusicUpload, AnalysisResult = get_models()
         
         analysis_result = AnalysisResult.query.filter_by(upload_id=upload_id).first()
@@ -397,12 +475,12 @@ def get_results(upload_id):
         current_app.logger.error(f"Get results error: {str(e)}")
         return jsonify({'error': 'Failed to retrieve results'}), 500
 
+
 @music_bp.route('/uploads', methods=['GET'])
 @cross_origin()
 def list_uploads():
     """List all uploads"""
     try:
-        # Get database models
         db, MusicUpload, AnalysisResult = get_models()
         
         uploads = MusicUpload.query.order_by(MusicUpload.upload_time.desc()).limit(50).all()
@@ -411,4 +489,34 @@ def list_uploads():
     except Exception as e:
         current_app.logger.error(f"List uploads error: {str(e)}")
         return jsonify({'error': 'Failed to list uploads'}), 500
+
+
+@music_bp.route('/analyzer/info', methods=['GET'])
+@cross_origin()
+def get_analyzer_info():
+    """Get information about the MusicAnalyzer logic layer"""
+    return jsonify({
+        'analyzer_class': 'MusicAnalyzer',
+        'analysis_order': ['beat', 'melody', 'sections'],
+        'supported_formats': list(ALLOWED_EXTENSIONS),
+        'max_file_size_mb': MAX_FILE_SIZE // (1024 * 1024),
+        'features': {
+            'beat_analysis': {
+                'tempo_detection': True,
+                'beat_tracking': True,
+                'confidence_scoring': True
+            },
+            'melody_analysis': {
+                'onset_detection': True,
+                'legato_staccato_classification': True,
+                'segment_statistics': True
+            },
+            'section_analysis': {
+                'time_signature_estimation': True,
+                'structural_segmentation': True,
+                'phrase_detection': False  # Placeholder for future
+            }
+        },
+        'version': '2.0.0'
+    })
 

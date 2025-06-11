@@ -9,10 +9,11 @@ services:
     ports:
       - "5001:5001"
     environment:
-      - FLASK_ENV=production
-      - FLASK_DEBUG=False
+      - FLASK_ENV=development
+      - FLASK_DEBUG=True
     volumes:
       - /tmp/tango-uploads:/tmp/uploads
+      - ./backend:/app
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5001/api/music/health"]
