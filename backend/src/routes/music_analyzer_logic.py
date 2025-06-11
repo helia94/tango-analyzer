@@ -15,6 +15,9 @@ from dataclasses import dataclass
 from enum import Enum
 
 
+MIN_SEGMENT_DURATION = 1.0  # Minimum segment duration in seconds
+
+
 class AnalysisMethod(Enum):
     """Enumeration of analysis methods"""
     LIBROSA = "librosa"
@@ -560,187 +563,220 @@ class MusicAnalyzer:
     
     def _postprocess_melody_segments(self, segments: List[MelodySegment]) -> List[MelodySegment]:
         """
-        Postprocess melody segments to merge short segments using moving horizon approach.
+        Postprocess melody segments to ensure no legato or staccato sections are shorter than 3 seconds.
         
-        Ensures no segment is shorter than 3 seconds by merging with adjacent segments
-        using majority rule within a moving horizon.
+        Uses 6-second neighborhood majority rule:
+        1. For each segment < 3 seconds, look at 3 seconds before and after it
+        2. Determine majority type (legato/staccato) in that 6-second window
+        3. Relabel the short segment to match the majority
+        4. Merge adjacent segments of the same type
+        5. Repeat until no segments < 3 seconds remain
         
         Args:
-            segments (List[MelodySegment]): Original melody segments
+            segments: List of melody segments to postprocess
             
         Returns:
-            List[MelodySegment]: Processed segments with no segment shorter than 3 seconds
+            List[MelodySegment]: Postprocessed segments with no segments < 3 seconds
         """
         if not segments:
             return segments
         
-        MIN_SEGMENT_DURATION = 3.0  # 3 seconds minimum
-        processed_segments = segments.copy()
-        
-        # Continue processing until no segments are shorter than 3 seconds
+        max_iterations = 20  # Prevent infinite loops
         iteration = 0
-        max_iterations = min (len(segments), 4)  # Prevent infinite loops
         
         while iteration < max_iterations:
-            iteration += 1
-            short_segments_found = False
-            
             # Find segments shorter than 3 seconds
-            for i, segment in enumerate(processed_segments):
-                if segment.duration < MIN_SEGMENT_DURATION:
-                    short_segments_found = True
-                    
-                    # Apply moving horizon approach to merge this segment
-                    processed_segments = self._merge_short_segment_with_horizon(
-                        processed_segments, i, MIN_SEGMENT_DURATION
-                    )
-                    break  # Restart the loop after modification
+            short_segments = [
+                (i, seg) for i, seg in enumerate(segments) 
+                if seg.duration < MIN_SEGMENT_DURATION
+            ]
             
-            if not short_segments_found:
+            if not short_segments:
+                break  # No more short segments
+            
+            # Process each short segment using 6-second neighborhood majority rule
+            segments_modified = False
+            for short_index, short_segment in short_segments:
+                # Apply 6-second neighborhood majority rule
+                new_segments = self._apply_neighborhood_majority_rule(segments, short_index)
+                
+                if len(new_segments) != len(segments):
+                    segments = new_segments
+                    segments_modified = True
+                    break  # Process one at a time to maintain indices
+            
+            if not segments_modified:
+                # If no modifications were made, merge adjacent same-type segments
+                segments = self._merge_adjacent_same_type_segments(segments)
+                
+                # Check if we still have short segments after merging
+                remaining_short = [seg for seg in segments if seg.duration < MIN_SEGMENT_DURATION]
+                if remaining_short:
+                    # Force merge remaining short segments with immediate neighbors
+                    segments = self._force_merge_remaining_short_segments(segments)
+                
                 break
+            
+            iteration += 1
         
-        return processed_segments
+        return segments
     
-    def _merge_short_segment_with_horizon(self, segments: List[MelodySegment], 
-                                        short_index: int, min_duration: float) -> List[MelodySegment]:
+    def _apply_neighborhood_majority_rule(self, segments: List[MelodySegment], 
+                                        short_index: int) -> List[MelodySegment]:
         """
-        Merge a short segment using moving horizon approach with majority rule.
+        Apply 6-second neighborhood majority rule to a short segment.
         
         Args:
-            segments (List[MelodySegment]): Current segments list
-            short_index (int): Index of the short segment to merge
-            min_duration (float): Minimum required duration
+            segments: List of melody segments
+            short_index: Index of the short segment to process
             
         Returns:
-            List[MelodySegment]: Updated segments list with merged segment
+            List[MelodySegment]: Updated segments with majority rule applied
         """
         if short_index >= len(segments):
             return segments
         
         short_segment = segments[short_index]
         
-        # Define horizon window (segments to consider for merging)
-        horizon_size = 3  # Consider up to 3 segments on each side
-        start_idx = max(0, short_index - horizon_size)
-        end_idx = min(len(segments), short_index + horizon_size + 1)
+        # Define 6-second time window: 3 seconds before and after the short segment
+        window_start = short_segment.start - 3.0
+        window_end = short_segment.end + 3.0
         
-        # Find the best merge candidate using majority rule
-        merge_candidate_idx = self._find_best_merge_candidate(
-            segments, short_index, start_idx, end_idx
+        # Calculate time coverage of each type in the 6-second window
+        legato_time = 0.0
+        staccato_time = 0.0
+        
+        for segment in segments:
+            # Calculate overlap between segment and the 6-second window
+            overlap_start = max(segment.start, window_start)
+            overlap_end = min(segment.end, window_end)
+            overlap_duration = max(0.0, overlap_end - overlap_start)
+            
+            if overlap_duration > 0:
+                if segment.segment_type == SegmentType.LEGATO:
+                    legato_time += overlap_duration
+                else:  # STACCATO
+                    staccato_time += overlap_duration
+        
+        # Determine majority type based on time coverage
+        majority_type = SegmentType.LEGATO if legato_time > staccato_time else SegmentType.STACCATO
+        
+        # If the short segment already matches majority type, no change needed
+        if short_segment.segment_type == majority_type:
+            return segments
+        
+        # Relabel the short segment to match majority type
+        relabeled_segment = MelodySegment(
+            start=short_segment.start,
+            end=short_segment.end,
+            segment_type=majority_type,
+            confidence=short_segment.confidence,
+            duration=short_segment.duration
         )
         
-        if merge_candidate_idx is None:
-            # If no good candidate found, merge with immediate neighbor
-            merge_candidate_idx = self._find_immediate_neighbor(segments, short_index)
+        # Create new segments list with relabeled segment
+        new_segments = []
+        for i, segment in enumerate(segments):
+            if i == short_index:
+                new_segments.append(relabeled_segment)
+            else:
+                new_segments.append(segment)
         
-        if merge_candidate_idx is not None:
-            # Perform the merge
-            return self._merge_segments(segments, short_index, merge_candidate_idx)
+        return new_segments
+    
+    def _merge_adjacent_same_type_segments(self, segments: List[MelodySegment]) -> List[MelodySegment]:
+        """
+        Merge adjacent segments of the same type.
+        
+        Args:
+            segments: List of melody segments
+            
+        Returns:
+            List[MelodySegment]: Segments with adjacent same-type segments merged
+        """
+        if len(segments) <= 1:
+            return segments
+        
+        merged_segments = []
+        current_segment = segments[0]
+        
+        for i in range(1, len(segments)):
+            next_segment = segments[i]
+            
+            # Check if current and next segments are adjacent and same type
+            if (abs(current_segment.end - next_segment.start) < 0.1 and  # Adjacent (within 0.1s)
+                current_segment.segment_type == next_segment.segment_type):
+                
+                # Merge the segments
+                current_segment = MelodySegment(
+                    start=current_segment.start,
+                    end=next_segment.end,
+                    segment_type=current_segment.segment_type,
+                    confidence=max(current_segment.confidence, next_segment.confidence),
+                    duration=next_segment.end - current_segment.start
+                )
+            else:
+                # Segments are not mergeable, add current to result and move to next
+                merged_segments.append(current_segment)
+                current_segment = next_segment
+        
+        # Add the last segment
+        merged_segments.append(current_segment)
+        
+        return merged_segments
+    
+    def _force_merge_remaining_short_segments(self, segments: List[MelodySegment]) -> List[MelodySegment]:
+        """
+        Force merge any remaining short segments with their immediate neighbors.
+        
+        Args:
+            segments: List of melody segments
+            
+        Returns:
+            List[MelodySegment]: Segments with all short segments merged
+        """
+        if len(segments) <= 1:
+            return segments
+        
+        # Find remaining short segments
+        short_indices = [i for i, seg in enumerate(segments) if seg.duration < MIN_SEGMENT_DURATION]
+        
+        # Process short segments from right to left to maintain indices
+        for short_index in reversed(short_indices):
+            if short_index >= len(segments):
+                continue
+            
+            # Find best neighbor to merge with
+            merge_with_index = None
+            
+            # Prefer merging with right neighbor, then left neighbor
+            if short_index < len(segments) - 1:
+                merge_with_index = short_index + 1
+            elif short_index > 0:
+                merge_with_index = short_index - 1
+            
+            if merge_with_index is not None:
+                segments = self._merge_two_segments(segments, short_index, merge_with_index)
         
         return segments
     
-    def _find_best_merge_candidate(self, segments: List[MelodySegment], 
-                                 short_index: int, start_idx: int, end_idx: int) -> Optional[int]:
+    def _merge_two_segments(self, segments: List[MelodySegment], 
+                          index1: int, index2: int) -> List[MelodySegment]:
         """
-        Find the best candidate for merging using majority rule within horizon.
+        Merge two specific segments.
         
         Args:
-            segments (List[MelodySegment]): Current segments list
-            short_index (int): Index of short segment
-            start_idx (int): Start of horizon window
-            end_idx (int): End of horizon window
+            segments: List of melody segments
+            index1: Index of first segment
+            index2: Index of second segment
             
         Returns:
-            Optional[int]: Index of best merge candidate, or None if no good candidate
+            List[MelodySegment]: Updated segments with two segments merged
         """
-        short_segment = segments[short_index]
-        
-        # Count segment types in the horizon
-        legato_count = 0
-        staccato_count = 0
-        candidates = []
-        
-        for i in range(start_idx, end_idx):
-            if i == short_index:
-                continue
-                
-            segment = segments[i]
-            candidates.append(i)
-            
-            if segment.segment_type == SegmentType.LEGATO:
-                legato_count += 1
-            else:
-                staccato_count += 1
-        
-        if not candidates:
-            return None
-        
-        # Determine majority type
-        majority_type = SegmentType.LEGATO if legato_count > staccato_count else SegmentType.STACCATO
-        
-        # Find candidates of majority type, preferring adjacent segments
-        same_type_candidates = [
-            i for i in candidates 
-            if segments[i].segment_type == majority_type
-        ]
-        
-        if same_type_candidates:
-            # Prefer adjacent segments
-            adjacent_candidates = [
-                i for i in same_type_candidates 
-                if abs(i - short_index) == 1
-            ]
-            
-            if adjacent_candidates:
-                return adjacent_candidates[0]
-            else:
-                # Return closest same-type candidate
-                return min(same_type_candidates, key=lambda x: abs(x - short_index))
-        
-        # If no same-type candidates, find any adjacent candidate
-        adjacent_candidates = [
-            i for i in candidates 
-            if abs(i - short_index) == 1
-        ]
-        
-        return adjacent_candidates[0] if adjacent_candidates else None
-    
-    def _find_immediate_neighbor(self, segments: List[MelodySegment], short_index: int) -> Optional[int]:
-        """
-        Find immediate neighbor (left or right) for merging.
-        
-        Args:
-            segments (List[MelodySegment]): Current segments list
-            short_index (int): Index of short segment
-            
-        Returns:
-            Optional[int]: Index of immediate neighbor, or None if none available
-        """
-        # Prefer left neighbor, then right neighbor
-        if short_index > 0:
-            return short_index - 1
-        elif short_index < len(segments) - 1:
-            return short_index + 1
-        
-        return None
-    
-    def _merge_segments(self, segments: List[MelodySegment], 
-                       index1: int, index2: int) -> List[MelodySegment]:
-        """
-        Merge two segments and return updated segments list.
-        
-        Args:
-            segments (List[MelodySegment]): Current segments list
-            index1 (int): Index of first segment to merge
-            index2 (int): Index of second segment to merge
-            
-        Returns:
-            List[MelodySegment]: Updated segments list with merged segment
-        """
-        if index1 == index2 or index1 >= len(segments) or index2 >= len(segments):
+        if index1 >= len(segments) or index2 >= len(segments) or index1 == index2:
             return segments
         
-        # Ensure index1 < index2 for consistent processing
+        # Ensure index1 < index2
         if index1 > index2:
             index1, index2 = index2, index1
         
@@ -752,13 +788,18 @@ class MusicAnalyzer:
         merged_end = max(segment1.end, segment2.end)
         merged_duration = merged_end - merged_start
         
-        # Use majority rule for segment type (or higher confidence)
-        if segment1.segment_type == segment2.segment_type:
-            merged_type = segment1.segment_type
-            merged_confidence = max(segment1.confidence, segment2.confidence)
-        else:
-            # Choose type with higher confidence
+        # Use the type of the longer segment, or higher confidence if similar duration
+        if abs(segment1.duration - segment2.duration) < 0.5:
+            # Similar durations, use higher confidence
             if segment1.confidence >= segment2.confidence:
+                merged_type = segment1.segment_type
+                merged_confidence = segment1.confidence
+            else:
+                merged_type = segment2.segment_type
+                merged_confidence = segment2.confidence
+        else:
+            # Different durations, use type of longer segment
+            if segment1.duration > segment2.duration:
                 merged_type = segment1.segment_type
                 merged_confidence = segment1.confidence
             else:
@@ -776,12 +817,11 @@ class MusicAnalyzer:
         
         # Create new segments list
         new_segments = []
-        
         for i, segment in enumerate(segments):
             if i == index1:
                 new_segments.append(merged_segment)
             elif i == index2:
-                continue  # Skip the second segment as it's merged
+                continue  # Skip second segment
             else:
                 new_segments.append(segment)
         
