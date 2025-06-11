@@ -1,5 +1,5 @@
 import { useState, useRef } from 'react'
-import { Upload, Music, Activity, BarChart3, Download, Play, Pause, Volume2, Eye, Waves, ZoomIn } from 'lucide-react'
+import { Upload, Music, Activity, BarChart3, Download, Play, Pause, Volume2, Eye, Waves, Filter, Sliders } from 'lucide-react'
 import { Button } from '@/components/ui/button.jsx'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card.jsx'
 import { Progress } from '@/components/ui/progress.jsx'
@@ -7,8 +7,8 @@ import { Badge } from '@/components/ui/badge.jsx'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs.jsx'
 import { Switch } from '@/components/ui/switch.jsx'
 import { Label } from '@/components/ui/label.jsx'
-import ZoomedMusicVisualizer from '@/components/ZoomedMusicVisualizer.jsx'
-import BeatsList from '@/components/BeatsList.jsx'
+import FilteredMusicVisualizer from '@/components/FilteredMusicVisualizer.jsx'
+import FilteredBeatsList from '@/components/FilteredBeatsList.jsx'
 import './App.css'
 
 const API_BASE_URL = 'http://localhost:5001/api/music'
@@ -210,12 +210,16 @@ function App() {
             Argentine Tango Music Analyzer
           </h1>
           <p className="text-lg text-slate-600 dark:text-slate-400">
-            Detailed beat detection and melody analysis with zoomed visualization
+            Advanced beat filtering with confidence and strength thresholds
           </p>
           <div className="flex items-center justify-center gap-2 mt-2">
-            <ZoomIn className="h-5 w-5 text-blue-500" />
+            <Filter className="h-5 w-5 text-blue-500" />
             <Badge variant="secondary" className="text-sm">
-              16-second detailed view with auto-scroll
+              Filter beats by confidence & strength
+            </Badge>
+            <Sliders className="h-5 w-5 text-green-500" />
+            <Badge variant="secondary" className="text-sm">
+              Adjustable thresholds
             </Badge>
           </div>
         </div>
@@ -228,7 +232,7 @@ function App() {
               Upload Tango Music
             </CardTitle>
             <CardDescription>
-              Upload your Argentine tango music file for detailed analysis (MP3, WAV, FLAC, M4A, AAC, OGG)
+              Upload your Argentine tango music file for detailed analysis with filtering (MP3, WAV, FLAC, M4A, AAC, OGG)
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -304,14 +308,14 @@ function App() {
           </CardContent>
         </Card>
 
-        {/* Music Player and Detailed Visualization */}
+        {/* Music Player and Filtered Visualization */}
         {audioUrl && (
           <Card className="mb-8">
             <CardHeader>
               <div className="flex justify-between items-center">
                 <CardTitle className="flex items-center gap-2">
                   <Volume2 className="h-5 w-5" />
-                  Detailed Music Visualization
+                  Filtered Music Visualization
                 </CardTitle>
                 
                 {analysisResults && (
@@ -331,8 +335,7 @@ function App() {
                 )}
               </div>
               <CardDescription>
-                Zoomed view showing 16 seconds (8s past + 8s future) with auto-scroll. 
-                Use zoom controls to adjust the time window.
+                Filter beats by confidence and strength thresholds. Only beats above your thresholds will be shown.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
@@ -361,9 +364,9 @@ function App() {
                 </div>
               </div>
 
-              {/* Detailed Music Visualization */}
+              {/* Filtered Music Visualization */}
               {duration > 0 && (
-                <ZoomedMusicVisualizer
+                <FilteredMusicVisualizer
                   audioRef={audioRef}
                   duration={duration}
                   currentTime={currentTime}
@@ -460,7 +463,7 @@ function App() {
             <Card>
               <CardHeader>
                 <div className="flex justify-between items-center">
-                  <CardTitle>Detailed Analysis</CardTitle>
+                  <CardTitle>Detailed Analysis with Filtering</CardTitle>
                   <div className="flex gap-2">
                     <Button 
                       variant="outline" 
@@ -486,13 +489,13 @@ function App() {
               <CardContent>
                 <Tabs defaultValue="beats" className="w-full">
                   <TabsList className="grid w-full grid-cols-3">
-                    <TabsTrigger value="beats">Beat Detection</TabsTrigger>
+                    <TabsTrigger value="beats">Filtered Beat Detection</TabsTrigger>
                     <TabsTrigger value="melody">Melody Analysis</TabsTrigger>
                     <TabsTrigger value="structure">Tango Structure</TabsTrigger>
                   </TabsList>
                   
                   <TabsContent value="beats" className="space-y-4">
-                    <BeatsList 
+                    <FilteredBeatsList 
                       beats={analysisResults.beat_analysis.beats}
                       currentTime={currentTime}
                       onBeatClick={handleBeatClick}
