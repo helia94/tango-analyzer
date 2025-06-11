@@ -13,6 +13,8 @@ import librosa
 from typing import Dict, List, Any, Optional, Tuple
 from dataclasses import dataclass
 from enum import Enum
+import numpy as np
+from sklearn.mixture import GaussianMixture
 
 
 MIN_SEGMENT_DURATION = 1.0  # Minimum segment duration in seconds
@@ -489,34 +491,47 @@ class MusicAnalyzer:
         """Calculate intervals between consecutive onsets"""
         return np.diff(onsets)
     
-    def _classify_melody_segments(self, onsets: np.ndarray, intervals: np.ndarray) -> List[MelodySegment]:
-        """Classify melody segments as legato or staccato"""
-        median_interval = np.median(intervals)
-        segments = []
-        
+    def _classify_melody_segments(
+            self,
+            onsets: np.ndarray,
+            intervals: np.ndarray,
+            model: GaussianMixture | None = None
+    ) -> List[MelodySegment]:
+        """
+        Legato / staccato classification via 2-component Gaussian Mixture on *log-IOIs*.
+        Falls back to a fresh model if none is supplied.
+        """
+        if len(intervals) < 2:
+            raise ValueError("Need ≥2 intervals")
+
+        # log-scale gives nicer Gaussian-ish shape
+        X = np.log(intervals.reshape(-1, 1))
+
+        gmm = model or GaussianMixture(
+            n_components=2,
+            covariance_type="full",
+            n_init=10,
+            random_state=0,
+        ).fit(X)
+
+        labels      = gmm.predict(X)                # hard cluster label for each IOI
+        posteriors  = gmm.predict_proba(X).max(1)   # certainty of chosen label
+        means       = np.exp(gmm.means_).ravel()    # back to seconds
+        legato_lab  = np.argmax(means)              # the cluster with longer IOI
+
+        segments: list[MelodySegment] = []
         for i in range(len(onsets) - 1):
-            start_time = onsets[i]
-            end_time = onsets[i + 1]
-            interval = intervals[i]
-            duration = float(end_time - start_time)
-            
-            # Classification logic: longer intervals = legato, shorter = staccato
-            if interval > median_interval:
-                segment_type = SegmentType.LEGATO
-            else:
-                segment_type = SegmentType.STACCATO
-            
-            # Confidence based on deviation from median
-            confidence = min(1.0, abs(interval - median_interval) / median_interval + 0.5)
-            
-            segments.append(MelodySegment(
-                start=float(start_time),
-                end=float(end_time),
-                segment_type=segment_type,
-                confidence=float(confidence),
-                duration=duration
-            ))
-        
+            seg_type   = SegmentType.LEGATO if labels[i] == legato_lab else SegmentType.STACCATO
+            confidence = float(posteriors[i])       # 0–1, already calibrated
+            segments.append(
+                MelodySegment(
+                    start=float(onsets[i]),
+                    end=float(onsets[i + 1]),
+                    segment_type=seg_type,
+                    confidence=confidence,
+                    duration=float(onsets[i + 1] - onsets[i])
+                )
+            )
         return segments
     
     def _calculate_melody_statistics(self, segments: List[MelodySegment], intervals: np.ndarray) -> MelodyStatistics:
