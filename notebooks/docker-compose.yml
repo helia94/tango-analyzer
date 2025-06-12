@@ -1,0 +1,13 @@
+version: "3.9"
+
+services:
+  jupyter:
+    build: .
+    container_name: tango-jupyter
+    ports:
+      - "8888:8888"
+    volumes:
+      - ./:/workspace
+    environment:
+      - PYTHONUNBUFFERED=1
+    restart: unless-stopped

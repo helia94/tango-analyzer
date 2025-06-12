@@ -1,0 +1,14 @@
+# Core DSP / ML
+numpy>=1.26
+scipy
+pandas
+librosa>=0.10
+soundfile
+scikit-learn
+
+# Jupyter UX
+jupyterlab               # full Lab UI
+ipywidgets
+matplotlib
+nbformat
+nbclient
