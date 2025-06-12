@@ -15,8 +15,7 @@ from werkzeug.utils import secure_filename
 from flask_cors import cross_origin
 
 # Import the logic layer
-from src.routes.tango_analyzer_gpt import MusicAnalyzer, CompleteAnalysisResult
-from src.routes.utils import to_dict
+from src.routes.music_analyzer_logic import MusicAnalyzer, CompleteAnalysisResult
 
 # Import models after Flask app is initialized
 def get_models():
@@ -135,7 +134,7 @@ class MusicAnalysisAPI:
             analysis_result = analyzer.analyze_complete()
             
             # Convert to dictionary format
-            result_dict = to_dict(analysis_result)
+            result_dict = analyzer.to_dict(analysis_result)
             
             return True, result_dict, ''
             
