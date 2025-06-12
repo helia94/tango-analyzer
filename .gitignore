@@ -25,4 +25,4 @@ dist-ssr
 *.sln
 *.sw?
 .supabase/.temp/*
-*/__pycache__/*
+.*/__pycache__/*
